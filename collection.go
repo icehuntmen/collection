@@ -12,6 +12,7 @@ import (
 // Используется для хранения элементов с уникальными ключами и предоставляет множество полезных методов.
 type Collection[K comparable, V any] struct {
 	data  map[K]V
+	order []K
 	mutex sync.RWMutex
 }
 
@@ -1505,12 +1506,13 @@ func (c *Collection[K, V]) Equals(other *Collection[K, V]) bool {
 func (c *Collection[K, V]) Sort(less func(V, V, K, K) bool) *Collection[K, V] {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+
 	type kv struct {
 		Key   K
 		Value V
 	}
-	items := make([]kv, 0, len(c.data))
 
+	items := make([]kv, 0, len(c.data))
 	for k, v := range c.data {
 		items = append(items, kv{k, v})
 	}
@@ -1519,10 +1521,13 @@ func (c *Collection[K, V]) Sort(less func(V, V, K, K) bool) *Collection[K, V] {
 		return less(items[i].Value, items[j].Value, items[i].Key, items[j].Key)
 	})
 
-	c.data = make(map[K]V)
+	// Create new map to preserve ordering
+	newData := make(map[K]V, len(items))
 	for _, item := range items {
-		c.Set(item.Key, item.Value)
+		newData[item.Key] = item.Value
 	}
+	c.data = newData
+
 	return c
 }
 
@@ -1575,7 +1580,34 @@ func (c *Collection[K, V]) Sort(less func(V, V, K, K) bool) *Collection[K, V] {
 //
 // // элементы будут отсортированы по алфавиту ключей
 func (c *Collection[K, V]) ToSorted(less func(V, V, K, K) bool) *Collection[K, V] {
-	return c.Clone().Sort(less)
+	// Create a new collection and copy data safely
+	newColl := New[K, V]()
+
+	c.mutex.RLock()
+	// Create a slice of key-value pairs while holding the read lock
+	type kv struct {
+		Key   K
+		Value V
+	}
+	items := make([]kv, 0, len(c.data))
+	for k, v := range c.data {
+		items = append(items, kv{k, v})
+	}
+	c.mutex.RUnlock()
+
+	// Sort the items
+	sort.Slice(items, func(i, j int) bool {
+		return less(items[i].Value, items[j].Value, items[i].Key, items[j].Key)
+	})
+
+	// Populate the new collection
+	newColl.mutex.Lock()
+	defer newColl.mutex.Unlock()
+	for _, item := range items {
+		newColl.data[item.Key] = item.Value
+	}
+
+	return newColl
 }
 
 // ToReversed создаёт новую коллекцию, содержащую элементы исходной,
@@ -1619,12 +1651,25 @@ func (c *Collection[K, V]) ToSorted(less func(V, V, K, K) bool) *Collection[K, V
 func (c *Collection[K, V]) ToReversed() *Collection[K, V] {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	keys := c.Keys()
-	values := c.Values()
-	reversed := New[K, V]()
-	for i := len(keys) - 1; i >= 0; i-- {
-		reversed.Set(keys[i], values[i])
+
+	// Create a slice of key-value pairs
+	type kv struct {
+		key K
+		val V
 	}
+	items := make([]kv, 0, len(c.data))
+	for k, v := range c.data {
+		items = append(items, kv{key: k, val: v})
+	}
+
+	// Create new collection
+	reversed := New[K, V]()
+
+	// Populate in reverse order
+	for i := len(items) - 1; i >= 0; i-- {
+		reversed.Set(items[i].key, items[i].val)
+	}
+
 	return reversed
 }
 

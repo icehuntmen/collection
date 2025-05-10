@@ -124,6 +124,3 @@ groups := collection.GroupBy(items, func(item Item) KeyType {
 - Methods like `Sort`, `Values`, and `Keys` have O(n) complexity
 - Underlying storage is a standard Go map, so most operations have O(1) complexity
 
-## License
-
-MIT License
